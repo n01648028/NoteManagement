@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   StyleSheet,
   Button,
@@ -8,13 +8,17 @@ import {
   Modal,
   Alert,
   Platform,
-  Image, // Import Image from react-native
+  Image,
 } from "react-native";
+import Geolocation from "react-native-geolocation-service";
+import MapView, { Marker } from "react-native-maps";
+import PushNotification from "react-native-push-notification";
+import axios from "axios";
 
 import ParallaxScrollView from "@/components/ParallaxScrollView";
 import { ThemedText } from "@/components/ThemedText";
 import { ThemedView } from "@/components/ThemedView";
-import logo from "../../components/images2/notelogo.jpg"; // Correct relative path
+import logo from "../../components/images2/notelogo.jpg";
 
 export default function HomeScreen() {
   const [notes, setNotes] = useState([]);
@@ -25,9 +29,90 @@ export default function HomeScreen() {
   const [selectedNote, setSelectedNote] = useState(null);
   const [isDeleteModalVisible, setIsDeleteModalVisible] = useState(false);
   const [noteToDelete, setNoteToDelete] = useState(null);
+  const [searchQuery, setSearchQuery] = useState("");
 
-  const showAlert = (message: string) => {
-    console.log("showAlert called with message:", message);
+  // New state for geolocation and weather
+  const [location, setLocation] = useState(null);
+  const [weather, setWeather] = useState("");
+
+  // Show alerts based on weather
+  const showWeatherAlert = (weatherData) => {
+    if (weatherData && weatherData.main.temp > 30) {
+      PushNotification.localNotification({
+        title: "Weather Alert",
+        message: "It's too hot outside! Stay hydrated!",
+      });
+    } else if (weatherData && weatherData.weather[0].main === "Rain") {
+      PushNotification.localNotification({
+        title: "Weather Alert",
+        message: "It's raining! Don't forget your umbrella!",
+      });
+    }
+  };
+
+  // Fetch current weather based on geolocation
+  const fetchWeather = async (latitude, longitude) => {
+    //const apiKey = "YOUR_OPENWEATHER_API_KEY"; // replace with your OpenWeather API key
+    //try {
+    //  const response = await axios.get(
+    //    `https://api.openweathermap.org/data/2.5/weather?lat=${latitude}&lon=${longitude}&appid=${apiKey}&units=metric`
+    //  );
+    setWeather({
+      lat: "43.6066N",
+      lon: "79.5928W",
+      elevation: 127,
+      timezone: "UTC",
+      units: "metric",
+      current: {
+        icon: "partly_clear",
+        icon_num: 28,
+        summary: "Partly clear",
+        temperature: 16,
+        wind: { speed: 3.5, angle: 274, dir: "W" },
+        precipitation: { total: 0, type: "none" },
+        cloud_cover: 49,
+      },
+    });
+    showWeatherAlert({
+      lat: "43.6066N",
+      lon: "79.5928W",
+      elevation: 127,
+      timezone: "UTC",
+      units: "metric",
+      current: {
+        icon: "partly_clear",
+        icon_num: 28,
+        summary: "Partly clear",
+        temperature: 16,
+        wind: { speed: 3.5, angle: 274, dir: "W" },
+        precipitation: { total: 0, type: "none" },
+        cloud_cover: 49,
+      },
+    });
+    //} catch (error) {
+    //  console.error("Weather fetch error:", error);
+    //}
+  };
+
+  // Get the current location of the user
+  const getLocation = () => {
+    Geolocation.getCurrentPosition(
+      (position) => {
+        setLocation(position.coords);
+        fetchWeather(position.coords.latitude, position.coords.longitude);
+      },
+      (error) => {
+        console.log(error.message);
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
+    );
+  };
+
+  useEffect(() => {
+    getLocation();
+  }, []);
+
+  const showAlert = (message) => {
     if (Platform.OS === "web") {
       window.alert(message);
     } else {
@@ -36,7 +121,10 @@ export default function HomeScreen() {
   };
 
   const addOrUpdateNote = () => {
-    if (title.trim() === "" || content.trim() === "") return;
+    if (title.trim() === "" || content.trim() === "") {
+      showAlert("Please fill in the title and content.");
+      return;
+    }
 
     if (currentlyEditing !== null) {
       const updatedNotes = notes.map((note, index) =>
@@ -56,39 +144,25 @@ export default function HomeScreen() {
     setContent("");
   };
 
-  const editNote = (index) => {
-    const noteToEdit = notes[index];
-    setTitle(noteToEdit.title);
-    setTag(noteToEdit.tag);
-    setContent(noteToEdit.content);
-    setCurrentlyEditing(index);
-  };
-
   const deleteNote = () => {
-    const newNotes = notes.filter((_, i) => i !== noteToDelete);
-    setNotes(newNotes);
-    setIsDeleteModalVisible(false);
-    showAlert("Note deleted successfully!");
+    if (noteToDelete !== null) {
+      const updatedNotes = notes.filter((_, index) => index !== noteToDelete);
+      setNotes(updatedNotes);
+      setIsDeleteModalVisible(false);
+      showAlert("Note deleted successfully!");
+    }
   };
 
-  const confirmDeleteNote = (index) => {
-    setNoteToDelete(index);
-    setIsDeleteModalVisible(true);
-  };
-
-  const viewNoteDetails = (note) => {
-    setSelectedNote(note);
-  };
-
-  const closeNoteDetails = () => {
-    setSelectedNote(null);
-  };
+  const filteredNotes = notes.filter(
+    (note) =>
+      note.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      note.tag?.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   return (
     <ParallaxScrollView
       headerBackgroundColor={{ light: "#FFFFFF", dark: "#000000" }}
     >
-      {/* Add the logo at the top */}
       <View style={styles.logoContainer}>
         <Image source={logo} style={styles.logo} />
       </View>
@@ -96,6 +170,34 @@ export default function HomeScreen() {
       <ThemedView style={styles.titleContainer}>
         <ThemedText type="title">Note Management</ThemedText>
       </ThemedView>
+
+      {/* New MapView and Weather Information */}
+      {location && (
+        <MapView
+          style={styles.map}
+          initialRegion={{
+            latitude: location.latitude,
+            longitude: location.longitude,
+            latitudeDelta: 0.0922,
+            longitudeDelta: 0.0421,
+          }}
+        >
+          <Marker
+            coordinate={{
+              latitude: location.latitude,
+              longitude: location.longitude,
+            }}
+          />
+        </MapView>
+      )}
+
+      {weather && (
+        <ThemedView style={styles.weatherContainer}>
+          <ThemedText type="subtitle">Weather Information</ThemedText>
+          <ThemedText>Temperature: {weather.main.temp}°C</ThemedText>
+          <ThemedText>{weather.weather[0].description}</ThemedText>
+        </ThemedView>
+      )}
 
       <ThemedView style={styles.inputContainer}>
         <TextInput
@@ -123,64 +225,80 @@ export default function HomeScreen() {
         />
       </ThemedView>
 
-      <ThemedView style={styles.notesContainer}>
-        <ThemedText type="subtitle">Your Notes:</ThemedText>
-        <FlatList
-          data={notes}
-          renderItem={({ item, index }) => (
-            <ThemedView style={styles.noteItem}>
-              <ThemedText style={styles.noteTitle}>{item.title}</ThemedText>
-              <ThemedText style={styles.noteTag}>
-                #{item.tag || "No Tag"}
-              </ThemedText>
-              <ThemedText>{item.content}</ThemedText>
-              <View style={styles.buttonsContainer}>
-                <Button title="Edit" onPress={() => editNote(index)} />
-                <Button
-                  title="Delete"
-                  onPress={() => confirmDeleteNote(index)}
-                />
-                <Button title="View" onPress={() => viewNoteDetails(item)} />
-              </View>
-            </ThemedView>
-          )}
-          keyExtractor={(item, index) => index.toString()}
+      <ThemedView style={styles.searchContainer}>
+        <TextInput
+          style={styles.searchBar}
+          placeholder="Search by title or tag..."
+          value={searchQuery}
+          onChangeText={setSearchQuery}
         />
       </ThemedView>
 
-      {/* Full-Screen View Modal for Viewing Note Details */}
+      <ThemedView style={styles.notesContainer}>
+        <ThemedText type="subtitle">Your Notes:</ThemedText>
+        <FlatList
+          data={filteredNotes}
+          keyExtractor={(item, index) => index.toString()}
+          renderItem={({ item, index }) => (
+            <View style={styles.noteItem}>
+              <ThemedText style={styles.noteTitle}>{item.title}</ThemedText>
+              {item.tag && (
+                <ThemedText style={styles.noteTag}>{item.tag}</ThemedText>
+              )}
+              <View style={{ flexDirection: "row", alignItems: "center" }}>
+                <Button
+                  title="Edit"
+                  onPress={() => {
+                    setTitle(item.title);
+                    setTag(item.tag);
+                    setContent(item.content);
+                    setCurrentlyEditing(index);
+                  }}
+                />
+                <Button title="View" onPress={() => setSelectedNote(item)} />
+                <Button
+                  title="Delete"
+                  onPress={() => {
+                    setNoteToDelete(index);
+                    setIsDeleteModalVisible(true);
+                  }}
+                />
+                {/* Button to check weather beside each note */}
+                <Button title="Check Weather" onPress={fetchWeatherData} />
+              </View>
+            </View>
+          )}
+        />
+      </ThemedView>
+
+      {/* View Note Modal */}
       <Modal
-        visible={selectedNote !== null}
+        visible={!!selectedNote}
         animationType="slide"
-        onRequestClose={closeNoteDetails}
+        transparent={true}
+        onRequestClose={() => setSelectedNote(null)}
       >
-        <View style={styles.modalContainer}>
-          <ThemedText style={styles.modalTitle}>
+        <View style={styles.modalView}>
+          <ThemedText style={styles.noteTitle}>
             {selectedNote?.title}
           </ThemedText>
-          <ThemedText style={styles.modalTag}>
-            #{selectedNote?.tag || "No Tag"}
-          </ThemedText>
+          {selectedNote?.tag && <ThemedText>{selectedNote.tag}</ThemedText>}
           <ThemedText>{selectedNote?.content}</ThemedText>
-          <Button title="Close" onPress={closeNoteDetails} />
+          <Button title="Close" onPress={() => setSelectedNote(null)} />
         </View>
       </Modal>
 
-      {/* Confirmation Modal for Deleting Note */}
+      {/* Delete Confirmation Modal */}
       <Modal
         visible={isDeleteModalVisible}
         animationType="fade"
+        transparent={true}
         onRequestClose={() => setIsDeleteModalVisible(false)}
       >
-        <View style={styles.modalContainer}>
+        <View style={styles.modalView}>
           <ThemedText>Are you sure you want to delete this note?</ThemedText>
-          <View style={styles.modalButtons}>
-            <Button
-              title="Cancel"
-              onPress={() => setIsDeleteModalVisible(false)}
-            />
-            <Button title="Delete" onPress={deleteNote} />
-          </View>
+          <Button title="Yes" onPress={deleteNote} />
+          <Button title="No" onPress={() => setIsDeleteModalVisible(false)} />
         </View>
       </Modal>
     </ParallaxScrollView>
@@ -189,14 +307,14 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   logoContainer: {
-    alignItems: "center", // Centers the logo horizontally
-    marginTop: 1, // Adds space from the top
-    marginBottom: 20, // Adds space below the logo
+    alignItems: "center",
+    marginTop: 1,
+    marginBottom: 20,
   },
   logo: {
-    width: 200, // Adjust logo width
-    height: 330, // Adjust logo height
-    resizeMode: "contain", // Ensure logo maintains aspect ratio
+    width: 200,
+    height: 330,
+    resizeMode: "contain",
   },
   titleContainer: {
     flexDirection: "row",
@@ -217,48 +335,43 @@ const styles = StyleSheet.create({
     height: 80,
     textAlignVertical: "top",
   },
+  searchContainer: {
+    padding: 16,
+    backgroundColor: "#f8f8f8",
+  },
+  searchBar: {
+    borderWidth: 1,
+    borderColor: "#ccc",
+    padding: 8,
+    borderRadius: 4,
+  },
   notesContainer: {
     padding: 16,
   },
   noteItem: {
-    padding: 8,
-    borderWidth: 1,
-    borderColor: "#ccc",
-    borderRadius: 4,
-    marginBottom: 8,
+    marginBottom: 12,
   },
   noteTitle: {
     fontWeight: "bold",
-    fontSize: 16,
   },
   noteTag: {
-    fontStyle: "italic",
-    color: "#555",
+    color: "#888",
   },
-  buttonsContainer: {
-    flexDirection: "row", // Layout buttons in a row
-    gap: 10, // Adds space between the Edit and Delete buttons
-    marginTop: 10, // Adds space from the note content
+  weatherContainer: {
+    padding: 16,
+    marginBottom: 16,
   },
-  modalContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
+  modalView: {
+    backgroundColor: "#fff",
     padding: 20,
-    backgroundColor: "white",
+    margin: 20,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  modalTitle: {
-    fontSize: 24,
-    fontWeight: "bold",
-    marginBottom: 10,
-  },
-  modalTag: {
-    fontStyle: "italic",
-    marginBottom: 10,
-  },
-  modalButtons: {
-    flexDirection: "row",
-    gap: 10,
-    marginTop: 20,
+  map: {
+    width: "100%",
+    height: 250,
+    marginBottom: 20,
   },
 });
